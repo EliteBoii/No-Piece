@@ -1,6 +1,7 @@
 /* =========================================================
    NO-PIECE — script.js
    Particle field · live counters · terminal access sequence
+   · pirate authentication
    ========================================================= */
 (() => {
   'use strict';
@@ -171,68 +172,131 @@
     return target;
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
   /* -----------------------------------------------------
-     5. Access Terminal button — authentication sequence
+     5. Status sequence engine — drives the auth screen
+        (shared by the ACCESS TERMINAL flow and the
+        LOGIN validation flow so every readout behaves
+        and animates identically)
      ----------------------------------------------------- */
   const AUTH_STEPS = [
     { text: 'AUTHENTICATING', hold: 600 },
     { text: 'VERIFYING PIRATE DATABASE', hold: 650 },
     { text: 'ESTABLISHING SECURE CONNECTION', hold: 650 },
-    { text: 'ACCESS GRANTED', hold: 550, granted: true },
+    { text: 'ACCESS GRANTED', hold: 550 },
   ];
 
-  let isAuthenticating = false;
+  const LOGIN_SUCCESS_STEPS = [
+    { text: 'VALIDATING', hold: 550 },
+    { text: 'MATCH FOUND', hold: 550 },
+    { text: 'OPENING PROFILE', hold: 650 },
+  ];
 
-  function setAuthLine(el, step) {
+  const LOGIN_DENIED_STEPS = [
+    { text: 'ACCESS DENIED', hold: 750 },
+    { text: 'INVALID PIRATE ID OR SECURITY PIN', hold: 950 },
+  ];
+
+  const DENIED_COLOR = '#ff4d5e';
+  const DENIED_GLOW = 'rgba(255,77,94,.6)';
+  const DENIED_GLOW_SOFT = 'rgba(255,77,94,.55)';
+
+  function fadeSwapText(el, text) {
     return new Promise((resolve) => {
       el.style.opacity = '0';
       window.setTimeout(() => {
-        el.textContent = step.text;
-        el.classList.toggle('is-granted', !!step.granted);
+        el.textContent = text;
         el.style.opacity = '1';
         resolve();
       }, 160);
     });
   }
 
-  async function runAuthSequence() {
-    const authLine = document.getElementById('authLine');
-    const authRing = document.getElementById('authRing');
-    const progressBar = document.getElementById('authProgressBar');
-    if (!authLine || !authRing || !progressBar) return;
+  function resetStatusVisuals(line, ring, bar) {
+    line.classList.remove('is-granted');
+    line.style.color = '';
+    line.style.textShadow = '';
+    line.style.opacity = '1';
 
-    // reset state
-    authRing.classList.remove('is-done');
-    progressBar.classList.remove('is-granted');
-    progressBar.style.width = '0%';
-    authLine.classList.remove('is-granted');
-    authLine.style.opacity = '1';
-    authLine.textContent = AUTH_STEPS[0].text;
+    ring.classList.remove('is-done');
+    ring.style.animation = '';
+    ring.style.borderColor = '';
+    ring.style.borderTopColor = '';
+    ring.style.boxShadow = '';
 
-    for (let i = 0; i < AUTH_STEPS.length; i++) {
-      const step = AUTH_STEPS[i];
+    bar.classList.remove('is-granted');
+    bar.style.background = '';
+    bar.style.boxShadow = '';
+    bar.style.width = '0%';
+  }
+
+  function applyGrantedVisuals(line, ring, bar) {
+    line.classList.add('is-granted');
+    ring.classList.add('is-done');
+    bar.classList.add('is-granted');
+  }
+
+  function applyDeniedVisuals(line, ring, bar) {
+    line.style.color = DENIED_COLOR;
+    line.style.textShadow = `0 0 16px ${DENIED_GLOW}`;
+
+    ring.style.animation = 'none';
+    ring.style.borderColor = DENIED_COLOR;
+    ring.style.borderTopColor = DENIED_COLOR;
+    ring.style.boxShadow = `0 0 22px ${DENIED_GLOW_SOFT}`;
+
+    bar.style.background = DENIED_COLOR;
+    bar.style.boxShadow = `0 0 10px ${DENIED_COLOR}`;
+  }
+
+  /**
+   * Runs a sequence of status lines on the auth screen.
+   * resultVariant: 'granted' | 'denied' | null
+   *  - 'granted' flips the ring/line/bar to the success color
+   *    once the final step is reached (matches the original
+   *    ACCESS TERMINAL behaviour).
+   *  - 'denied' applies the alert color from the first step.
+   */
+  async function runStatusSequence(steps, resultVariant) {
+    const line = document.getElementById('authLine');
+    const ring = document.getElementById('authRing');
+    const bar = document.getElementById('authProgressBar');
+    if (!line || !ring || !bar) return;
+
+    resetStatusVisuals(line, ring, bar);
+
+    if (resultVariant === 'denied') {
+      applyDeniedVisuals(line, ring, bar);
+    }
+
+    line.textContent = steps[0].text;
+
+    for (let i = 0; i < steps.length; i++) {
+      const currentStep = steps[i];
 
       if (i > 0) {
-        await setAuthLine(authLine, step);
+        await fadeSwapText(line, currentStep.text);
       }
 
-      // nudge progress bar on next frame so the width transition fires
       requestAnimationFrame(() => {
-        progressBar.style.width = `${((i + 1) / AUTH_STEPS.length) * 100}%`;
+        bar.style.width = `${((i + 1) / steps.length) * 100}%`;
       });
 
-      if (step.granted) {
-        authRing.classList.add('is-done');
-        progressBar.classList.add('is-granted');
+      if (resultVariant === 'granted' && i === steps.length - 1) {
+        applyGrantedVisuals(line, ring, bar);
       }
 
-      await sleep(prefersReducedMotion ? 120 : step.hold);
+      await sleep(prefersReducedMotion ? 120 : currentStep.hold);
     }
   }
 
-  function sleep(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
-  }
+  /* -----------------------------------------------------
+     6. Access Terminal button — authentication sequence
+     ----------------------------------------------------- */
+  let isAuthenticating = false;
 
   function initAccessButton() {
     const btn = document.getElementById('accessBtn');
@@ -247,7 +311,7 @@
       await sleep(prefersReducedMotion ? 80 : 260);
 
       showScreen('auth');
-      await runAuthSequence();
+      await runStatusSequence(AUTH_STEPS, 'granted');
 
       const loginScreen = showScreen('login');
       btn.classList.remove('is-loading');
@@ -261,29 +325,60 @@
     });
   }
 
-  function flashState(btn, { text, color, glow, duration = 1600 }) {
-    const label = btn.querySelector('.access-btn__text');
-    if (!label) return;
+  /* -----------------------------------------------------
+     7. Pirate database — temporary in-memory records
+     ----------------------------------------------------- */
+  const PIRATE_DB = [
+    {
+      id: 'elite',
+      pin: '1234',
+      name: 'Elite',
+      berries: 5000,
+      bounty: 2500,
+      rank: 'Rookie',
+      admin: true,
+    },
+    {
+      id: 'brother',
+      pin: '5678',
+      name: 'Brother',
+      berries: 3000,
+      bounty: 1200,
+      rank: 'Rookie',
+      admin: false,
+    },
+  ];
 
-    const original = label.textContent;
-    label.textContent = text;
-    btn.style.background = color;
-    btn.style.boxShadow = `0 0 34px ${glow}, 0 0 90px ${glow}`;
+  const SESSION_KEY = 'noPieceActivePirate';
 
-    window.setTimeout(() => {
-      label.textContent = original;
-      btn.style.background = '';
-      btn.style.boxShadow = '';
-    }, duration);
+  function findPirate(pirateId, securityPin) {
+    if (!pirateId || !securityPin) return null;
+
+    const record = PIRATE_DB.find(
+      (p) =>
+        p.id.toLowerCase() === pirateId.toLowerCase() && p.pin === securityPin
+    );
+
+    return record ? { ...record } : null;
+  }
+
+  function savePirateSession(pirate) {
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(pirate));
+    } catch (err) {
+      // sessionStorage may be unavailable (e.g. private mode) — fail silently
+    }
   }
 
   /* -----------------------------------------------------
-     6. Login form — Pirate ID + Security PIN
+     8. Login form — Pirate ID + Security PIN
      ----------------------------------------------------- */
   function initLoginForm() {
     const form = document.getElementById('loginForm');
     const loginBtn = document.getElementById('loginBtn');
-    if (!form || !loginBtn) return;
+    const idInput = document.getElementById('pirateId');
+    const pinInput = document.getElementById('securityPin');
+    if (!form || !loginBtn || !idInput || !pinInput) return;
 
     let isValidating = false;
 
@@ -292,16 +387,30 @@
       if (isValidating) return;
       isValidating = true;
 
+      const enteredId = idInput.value.trim();
+      const enteredPin = pinInput.value.trim();
+
       loginBtn.classList.add('is-loading');
-      await sleep(prefersReducedMotion ? 150 : 1200);
+      await sleep(prefersReducedMotion ? 120 : 700);
       loginBtn.classList.remove('is-loading');
 
-      flashState(loginBtn, {
-        text: 'ACCESS CONFIRMED',
-        color: '#8dffb0',
-        glow: 'rgba(141,255,176,.6)',
-        duration: 1600,
-      });
+      const pirate = findPirate(enteredId, enteredPin);
+
+      showScreen('auth');
+
+      if (pirate) {
+        await runStatusSequence(LOGIN_SUCCESS_STEPS, 'granted');
+        savePirateSession(pirate);
+        // Session saved — dashboard not built yet, so we stop here.
+      } else {
+        await runStatusSequence(LOGIN_DENIED_STEPS, 'denied');
+        showScreen('login');
+        pinInput.value = '';
+
+        window.setTimeout(() => {
+          idInput.focus({ preventScroll: true });
+        }, prefersReducedMotion ? 0 : 250);
+      }
 
       isValidating = false;
     });
