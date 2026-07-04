@@ -154,38 +154,157 @@
   }
 
   /* -----------------------------------------------------
-     4. Access Terminal button — authentication sequence
+     4. Screen manager — landing / auth / login crossfade
      ----------------------------------------------------- */
+  const screens = {
+    landing: document.getElementById('screenLanding'),
+    auth: document.getElementById('screenAuth'),
+    login: document.getElementById('screenLogin'),
+  };
+
+  function showScreen(name) {
+    Object.values(screens).forEach((el) => {
+      if (el) el.classList.remove('is-active');
+    });
+    const target = screens[name];
+    if (target) target.classList.add('is-active');
+    return target;
+  }
+
+  /* -----------------------------------------------------
+     5. Access Terminal button — authentication sequence
+     ----------------------------------------------------- */
+  const AUTH_STEPS = [
+    { text: 'AUTHENTICATING', hold: 600 },
+    { text: 'VERIFYING PIRATE DATABASE', hold: 650 },
+    { text: 'ESTABLISHING SECURE CONNECTION', hold: 650 },
+    { text: 'ACCESS GRANTED', hold: 550, granted: true },
+  ];
+
+  let isAuthenticating = false;
+
+  function setAuthLine(el, step) {
+    return new Promise((resolve) => {
+      el.style.opacity = '0';
+      window.setTimeout(() => {
+        el.textContent = step.text;
+        el.classList.toggle('is-granted', !!step.granted);
+        el.style.opacity = '1';
+        resolve();
+      }, 160);
+    });
+  }
+
+  async function runAuthSequence() {
+    const authLine = document.getElementById('authLine');
+    const authRing = document.getElementById('authRing');
+    const progressBar = document.getElementById('authProgressBar');
+    if (!authLine || !authRing || !progressBar) return;
+
+    // reset state
+    authRing.classList.remove('is-done');
+    progressBar.classList.remove('is-granted');
+    progressBar.style.width = '0%';
+    authLine.classList.remove('is-granted');
+    authLine.style.opacity = '1';
+    authLine.textContent = AUTH_STEPS[0].text;
+
+    for (let i = 0; i < AUTH_STEPS.length; i++) {
+      const step = AUTH_STEPS[i];
+
+      if (i > 0) {
+        await setAuthLine(authLine, step);
+      }
+
+      // nudge progress bar on next frame so the width transition fires
+      requestAnimationFrame(() => {
+        progressBar.style.width = `${((i + 1) / AUTH_STEPS.length) * 100}%`;
+      });
+
+      if (step.granted) {
+        authRing.classList.add('is-done');
+        progressBar.classList.add('is-granted');
+      }
+
+      await sleep(prefersReducedMotion ? 120 : step.hold);
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
   function initAccessButton() {
     const btn = document.getElementById('accessBtn');
     if (!btn) return;
 
-    btn.addEventListener('click', () => {
-      if (btn.classList.contains('is-loading')) return;
+    btn.addEventListener('click', async () => {
+      if (isAuthenticating) return;
+      isAuthenticating = true;
 
       btn.classList.add('is-loading');
 
+      await sleep(prefersReducedMotion ? 80 : 260);
+
+      showScreen('auth');
+      await runAuthSequence();
+
+      const loginScreen = showScreen('login');
+      btn.classList.remove('is-loading');
+      isAuthenticating = false;
+
+      // focus the first field once the login screen is in view
       window.setTimeout(() => {
-        btn.classList.remove('is-loading');
-        flashGranted(btn);
-      }, 1800);
+        const firstField = loginScreen && loginScreen.querySelector('#pirateId');
+        if (firstField) firstField.focus({ preventScroll: true });
+      }, prefersReducedMotion ? 0 : 350);
     });
   }
 
-  function flashGranted(btn) {
+  function flashState(btn, { text, color, glow, duration = 1600 }) {
     const label = btn.querySelector('.access-btn__text');
     if (!label) return;
 
     const original = label.textContent;
-    label.textContent = 'ACCESS GRANTED';
-    btn.style.background = '#8dffb0';
-    btn.style.boxShadow = '0 0 34px rgba(141,255,176,.75), 0 0 90px rgba(141,255,176,.4)';
+    label.textContent = text;
+    btn.style.background = color;
+    btn.style.boxShadow = `0 0 34px ${glow}, 0 0 90px ${glow}`;
 
     window.setTimeout(() => {
       label.textContent = original;
       btn.style.background = '';
       btn.style.boxShadow = '';
-    }, 1600);
+    }, duration);
+  }
+
+  /* -----------------------------------------------------
+     6. Login form — Pirate ID + Security PIN
+     ----------------------------------------------------- */
+  function initLoginForm() {
+    const form = document.getElementById('loginForm');
+    const loginBtn = document.getElementById('loginBtn');
+    if (!form || !loginBtn) return;
+
+    let isValidating = false;
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (isValidating) return;
+      isValidating = true;
+
+      loginBtn.classList.add('is-loading');
+      await sleep(prefersReducedMotion ? 150 : 1200);
+      loginBtn.classList.remove('is-loading');
+
+      flashState(loginBtn, {
+        text: 'ACCESS CONFIRMED',
+        color: '#8dffb0',
+        glow: 'rgba(141,255,176,.6)',
+        duration: 1600,
+      });
+
+      isValidating = false;
+    });
   }
 
   /* -----------------------------------------------------
@@ -194,6 +313,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     initParticleField();
     initAccessButton();
+    initLoginForm();
     stampLastUpdated();
 
     const counter = document.getElementById('statPirates');
