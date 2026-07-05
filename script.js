@@ -161,6 +161,7 @@
     landing: document.getElementById('screenLanding'),
     auth: document.getElementById('screenAuth'),
     login: document.getElementById('screenLogin'),
+    dashboard: document.getElementById('screenDashboard'),
   };
 
   function showScreen(name) {
@@ -371,6 +372,28 @@
   }
 
   /* -----------------------------------------------------
+     Dashboard — renders the logged-in player's profile
+     ----------------------------------------------------- */
+  function populateDashboard(pirate) {
+    const idEl = document.getElementById('dashPirateId');
+    const nameEl = document.getElementById('dashName');
+    const rankEl = document.getElementById('dashRank');
+    const bountyEl = document.getElementById('dashBounty');
+    const berriesEl = document.getElementById('dashBerries');
+    const adminRow = document.getElementById('dashAdminRow');
+    if (!nameEl || !rankEl || !bountyEl || !berriesEl || !adminRow) return;
+
+    const formatNumber = (n) => Number(n || 0).toLocaleString('en-US');
+
+    if (idEl) idEl.textContent = String(pirate.id || '—').toUpperCase();
+    nameEl.textContent = pirate.name || '—';
+    rankEl.textContent = pirate.rank || '—';
+    bountyEl.textContent = formatNumber(pirate.bounty);
+    berriesEl.textContent = formatNumber(pirate.berries);
+    adminRow.hidden = !pirate.admin;
+  }
+
+  /* -----------------------------------------------------
      8. Login form — Pirate ID + Security PIN
      ----------------------------------------------------- */
   function initLoginForm() {
@@ -401,7 +424,12 @@
       if (pirate) {
         await runStatusSequence(LOGIN_SUCCESS_STEPS, 'granted');
         savePirateSession(pirate);
-        // Session saved — dashboard not built yet, so we stop here.
+
+        // brief hold on "OPENING PROFILE" before the fade into the dashboard
+        await sleep(prefersReducedMotion ? 120 : 500);
+
+        populateDashboard(pirate);
+        showScreen('dashboard');
       } else {
         await runStatusSequence(LOGIN_DENIED_STEPS, 'denied');
         showScreen('login');
